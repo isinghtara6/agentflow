@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentflow
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"   # long workflows + SSE
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"      # SSE
+    nginx.ingress.kubernetes.io/limit-rps: "50"             # coarse edge limit before the app limiter
+spec:
+  ingressClassName: nginx
+  tls: [{ hosts: [agentflow.example.com], secretName: agentflow-tls }]
+  rules:
+    - host: agentflow.example.com
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: agentflow, port: { number: 80 } } } }

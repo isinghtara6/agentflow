@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentflow
+  labels: { app: agentflow }
+spec:
+  replicas: 3
+  strategy:
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: agentflow }
+  template:
+    metadata:
+      labels: { app: agentflow }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 45   # > workflow graceful shutdown so in-flight runs finish
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: agentflow } }
+      containers:
+        - name: api
+          image: ghcr.io/YOUR_ORG/agentflow:latest
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - secretRef: { name: agentflow-secrets }
+          env:
+            - { name: ENV, value: prod }
+            - { name: LOG_LEVEL, value: INFO }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          startupProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            failureThreshold: 20
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8000 }
+            periodSeconds: 5
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }   # let the LB drain before SIGTERM
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentflow
+spec:
+  selector: { app: agentflow }
+  ports: [{ port: 80, targetPort: 8000 }]
